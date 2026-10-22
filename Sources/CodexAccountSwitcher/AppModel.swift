@@ -34,8 +34,9 @@ final class AppModel: AccountController, @MainActor ObservableObject {
     let objectWillChange = ObservableObjectPublisher()
     @Published private(set) var launchAtLoginState: LaunchAtLoginState = .disabled
 
-    override init(store: AccountStore, codex: any AccountClient, switchService: any SwitchServicing) {
-        super.init(store: store, codex: codex, switchService: switchService)
+    override init(store: AccountStore, codex: any AccountClient, switchService: any SwitchServicing,
+                  remoteHandoff: RemoteHandoffService? = nil) {
+        super.init(store: store, codex: codex, switchService: switchService, remoteHandoff: remoteHandoff)
         onChange = { [weak self] in self?.objectWillChange.send() }
         refreshLaunchAtLoginStatus()
     }
@@ -43,8 +44,30 @@ final class AppModel: AccountController, @MainActor ObservableObject {
     static func live() -> AppModel {
         let store = AccountStore()
         let codex = CodexClient()
+        // Packaging puts the resource bundle in Contents/Resources, while SwiftPM's
+        // generated Bundle.module accessor can assume the executable's directory.
+        let helperURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appending(path: "Resources/remote-handoff.py")
+        let roots = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
+        let helper = bundledRemoteHelper(in: roots) ?? (try? String(contentsOf: helperURL, encoding: .utf8)) ?? ""
+        let desktop = DesktopController()
+        let remoteHandoff = RemoteHandoffService(store: store,
+            client: SSHRemoteClient(helperSource: helper))
         return AppModel(store: store, codex: codex,
-                        switchService: SwitchService(desktop: DesktopController(), store: store, codex: codex))
+                        switchService: SwitchService(desktop: desktop, store: store, codex: codex,
+                                                     commitObserver: remoteHandoff), remoteHandoff: remoteHandoff)
+    }
+
+    static func bundledRemoteHelper(in roots: [URL]) -> String? {
+        for root in roots {
+            let bundleURL = root.appending(path: "CodexAccountSwitcher_CodexAccountSwitcher.bundle")
+            if let bundle = Bundle(url: bundleURL),
+               let url = bundle.url(forResource: "remote-handoff", withExtension: "py"),
+               let source = try? String(contentsOf: url, encoding: .utf8) {
+                return source
+            }
+        }
+        return nil
     }
 
     var launchesAtLogin: Bool { launchAtLoginState.isOn }

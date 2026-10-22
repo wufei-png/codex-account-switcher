@@ -4,6 +4,22 @@ import Testing
 
 
 struct SwitchServiceTests {
+    @Test func remoteHandoffNeverRunsBeforeTheLocalCommit() async {
+        for stage in [SwitchStage.closeDesktop, .saveCurrentCredential, .activateTargetCredential,
+                      .verifyTargetIdentity, .commitActiveAccountID] {
+            let observer = CommitObserverFixture()
+            let fixture = SwitchFixture(failure: stage, observer: observer)
+            await expectFailure(fixture, stage: stage)
+            #expect(await observer.committedIDs().isEmpty)
+        }
+    }
+
+    @Test func remoteHandoffStillRunsWhenDesktopReopenFailsAfterCommit() async {
+        let observer = CommitObserverFixture()
+        let fixture = SwitchFixture(failure: .reopenDesktop, observer: observer)
+        await expectFailure(fixture, stage: .reopenDesktop)
+        #expect(await observer.committedIDs() == [fixture.target.id])
+    }
     @Test func quitFailureLeavesBothAccountsUntouched() async {
         let fixture = SwitchFixture(failure: .closeDesktop)
         await expectFailure(fixture, stage: .closeDesktop)
@@ -253,7 +269,7 @@ private struct SwitchFixture {
     let store: FakeStore
     let service: SwitchService
 
-    init(failure: SwitchStage?, restoreFails: Bool = false) {
+    init(failure: SwitchStage?, restoreFails: Bool = false, observer: (any SwitchCommitObserving)? = nil) {
         let original = AccountProfile(
             id: UUID(), displayName: "Original", email: "original@example.com",
             accountID: "original-id", createdAt: Date(), lastUsedAt: nil
@@ -275,7 +291,14 @@ private struct SwitchFixture {
         service = SwitchService(
             desktop: FakeDesktop(recorder: recorder, failure: failure),
             store: store,
-            codex: FakeCodex(recorder: recorder, failure: failure, store: store, target: target)
+            codex: FakeCodex(recorder: recorder, failure: failure, store: store, target: target),
+            commitObserver: observer
         )
     }
+}
+
+private actor CommitObserverFixture: SwitchCommitObserving {
+    private var ids: [UUID] = []
+    func didCommitAccount(_ account: AccountProfile) { ids.append(account.id) }
+    func committedIDs() -> [UUID] { ids }
 }

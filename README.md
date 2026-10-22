@@ -44,7 +44,7 @@
 
 Codex Account Switcher is a free, open-source app for managing multiple authorized Codex accounts on macOS and Windows. Add personal, work, or client accounts through the browser once, then choose the account you need in the app. The everyday workflow requires no coding knowledge, Terminal commands, copied tokens, or config-file editing.
 
-After you select and confirm an account, the app closes Codex Desktop, completes the account handoff, verifies the selected identity, and reopens Desktop. Saved account data stays on your computer. The app runs without its own proxy, traffic router, cloud account service, or automatic account rotation.
+After you select and confirm an account, the app closes Codex Desktop, completes the account handoff, verifies the selected identity, and reopens Desktop. Saved account data stays on your computer by default; optional macOS SSH synchronization copies the selected login only to hosts you enable and confirm. The app runs without its own proxy, traffic router, cloud account service, or automatic account rotation.
 
 ## Official project identity
 
@@ -117,6 +117,21 @@ Run `codex-account-switcher update` to update, `open` to launch, or `uninstall` 
 
 Existing terminal processes keep their current runtime state. Start a new Codex CLI process to use the newly selected account.
 
+### Sync an account to SSH hosts (macOS)
+
+Remote hosts need Linux (kernel 5.3+ with pidfd syscalls permitted) or macOS, Codex and Python 3.11+ in the login shell's PATH, and a private, existing Codex directory with file-based credentials (`cli_auth_credentials_store = "file"`). Switcher checks `python3` and versioned commands such as `python3.11`, so the system's default Python can stay unchanged. Python builds without pidfd wrappers use the system C library when it exposes these operations. Otherwise, x86_64 and aarch64 can use the same kernel syscalls directly; other raw syscall ABIs are rejected. Use a directory owned by the remote user, without symlinks or shared write access.
+
+1. Configure a host alias in `~/.ssh/config`. Connect with `ssh alias` in Terminal to verify its host key and key-based login. Subsequent connections must work without prompts.
+2. Open **Settings → SSH Hosts** and add the alias. Leave the Codex directory blank to use the remote login shell's `CODEX_HOME` or `~/.codex`, or enter an absolute path or `~/…` path matching Desktop's SSH connection.
+3. Select **Test Connection**, then enable **Sync on account switch**. Up to eight hosts can be saved; each starts disabled. Connection tests do not change remote files.
+4. Select an account and confirm. The confirmation lists the hosts that will receive the complete reusable login credential. Finish or stop active Desktop tasks first.
+
+The local switch completes first, followed by each enabled host, then Desktop reopens. When a host has a running Desktop connection service, synchronization restarts that service and interrupts its tasks. Switcher verifies the account and workspace reported by the running service before showing success; writing `auth.json` alone is insufficient. It uses Codex's restart command when supported, or normally terminates and relaunches only the private control socket's Codex listener for older Desktop versions.
+
+Settings → SSH Hosts shows each host's sync progress and latest result, including the account and time of the last attempt. A failed host does not undo the local switch or skip other hosts. If verification fails, Switcher attempts to restore that host's previous credential; transport or service restart failures can leave the active account uncertain. Check the host before retrying with **Sync Current Account…**. This sync keeps Codex Desktop on your Mac open and leaves the local account unchanged; the remote Desktop service is restarted and verified.
+
+Restart existing remote CLI sessions to use the new account. Each computer can refresh its login independently, so a copied credential may become stale; sync again or sign in again when needed. Removing or disabling a host stops future synchronization and leaves its existing login in place.
+
 ## Feedback wanted
 
 The product is being shaped for ordinary desktop users. Join the public discussion, [“What still feels too technical in a Codex account switcher for Mac?”](https://github.com/liuzhao1225/codex-account-switcher/discussions/2), and tell us whether the friction is downloading the app, adding an account, seeing the active account, or understanding the switch confirmation.
@@ -125,7 +140,7 @@ Comparisons with other account switchers are welcome. Please describe the workfl
 
 ## Privacy and scope
 
-- Saved account data stays in user-only local directories on your computer.
+- Saved account data stays in user-only local directories. Optional macOS SSH synchronization copies the selected complete credential only to hosts you explicitly enable and confirm; removing a host does not revoke its copy.
 - The macOS Tibo outlook makes periodic public GET requests to codex-reset.com while the app runs. It sends no saved account details or credentials. If the public data is missing, stale, or inconsistent, the forecast appears unavailable.
 - Each saved profile contains a complete, reusable `auth.json` credential snapshot. macOS uses mode `0700` for profile directories and `0600` for credentials; Windows uses current-user ACLs. Both platforms replace credential files atomically.
 - Local file permissions define the current security boundary. User backups, filesystem snapshots, cloud backup tools, endpoint software, and other processes with access to the user's files may copy the saved credential snapshots.
@@ -137,9 +152,9 @@ Comparisons with other account switchers are welcome. Please describe the workfl
 - The current account appears through a row highlight inside the popover.
 - Persisted 5-hour and weekly usage remains visible while fresh data loads; the 5-hour row appears only when enabled and the service provides an exact 300-minute window.
 - Reset counts come from the usage response. Subscription dates come from saved login credentials and are not live billing or renewal confirmations; the row tooltip gives the snapshot check time.
-- Every switch stops immediately on the first reported error.
+- Local switching stops on the first reported local error. Optional SSH synchronization runs after local commit; a failed remote does not undo the local account or skip other hosts.
 - If target verification or the registry commit fails after credential activation, the app restores the just-saved original profile credential while preserving the original error. A restoration error is reported alongside it.
-- General rollback state machines, retries, credential backup files, recovery journals, startup recovery, and policy-based routing stay outside the product scope.
+- General rollback state machines, automatic retries, credential backup files, recovery journals, startup recovery, and policy-based routing stay outside the product scope. SSH synchronization provides per-host credential restoration and user-initiated retry.
 
 ## Release status
 
@@ -164,6 +179,7 @@ cd codex-account-switcher
 swift build
 swift test
 ./scripts/run-core-checks.sh
+python3 scripts/tests/remote-handoff.test.py
 ```
 
 Create a local macOS app bundle:
@@ -236,7 +252,7 @@ You choose and confirm every account. The app then completes the Codex Desktop h
 
 ### Does my account data leave my computer?
 
-Saved account data stays in user-only local folders: `~/Library/Application Support/Codex Account Switcher/` on macOS and `%LOCALAPPDATA%\Codex Account Switcher\` on Windows. The app has no account proxy, traffic router, or cloud profile service.
+Saved profiles use user-only local folders: `~/Library/Application Support/Codex Account Switcher/` on macOS and `%LOCALAPPDATA%\Codex Account Switcher\` on Windows. If you enable optional macOS SSH synchronization and confirm a switch, the complete selected login is also copied to those trusted hosts. The app has no account proxy, traffic router, or cloud profile service.
 
 ### Which systems are supported?
 

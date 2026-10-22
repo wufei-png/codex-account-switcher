@@ -17,10 +17,12 @@ open class AccountController {
     public private(set) var isAddingAccount = false { didSet { onChange?() } }
     public var visibleError: OperationError? { didSet { onChange?() } }
     public private(set) var activeIdentityConfirmed = true { didSet { onChange?() } }
+    public private(set) var remoteResults: [RemoteSyncResult] = [] { didSet { onChange?() } }
 
     private let store: AccountStore
     private let codex: any AccountClient
     private let switchService: any SwitchServicing
+    private let remoteHandoff: RemoteHandoffService?
     private var hasStarted = false
     private var usageRefreshTask: Task<Void, Never>?
     private var nextUsageRefreshTask: Task<Void, Never>?
@@ -31,11 +33,13 @@ open class AccountController {
     public init(
         store: AccountStore,
         codex: any AccountClient,
-        switchService: any SwitchServicing
+        switchService: any SwitchServicing,
+        remoteHandoff: RemoteHandoffService? = nil
     ) {
         self.store = store
         self.codex = codex
         self.switchService = switchService
+        self.remoteHandoff = remoteHandoff
     }
 
     public func text(_ key: String) -> String {
@@ -59,6 +63,11 @@ open class AccountController {
         hasStarted = true
         isMutating = true
         defer { isMutating = false }
+        await remoteHandoff?.observe { [weak self] result in
+            guard let self else { return }
+            self.remoteResults.removeAll { $0.hostID == result.hostID }
+            self.remoteResults.append(result)
+        }
         do {
             settings = try await store.loadSettings()
             apply(try await store.loadRegistry())
@@ -183,6 +192,8 @@ open class AccountController {
         do {
             try await syncActiveIdentity()
             guard id != activeAccountID else { return }
+            remoteResults = []
+            await remoteHandoff?.clearResults()
             try await switchService.switchAccount(to: id)
             apply(try await store.loadRegistry())
             await refreshSubscriptionSnapshots()
@@ -210,6 +221,7 @@ open class AccountController {
         } catch {
             showError(error)
         }
+        if let remoteHandoff { remoteResults = await remoteHandoff.results() }
     }
 
     public func addAccount() {
@@ -299,6 +311,43 @@ open class AccountController {
         }
     }
 
+    public func setRemoteHosts(_ hosts: [SSHRemoteHost]) async {
+        guard !isMutating else { return }
+        isMutating = true
+        defer { isMutating = false }
+        do {
+            guard hosts.count <= 8,
+                  Set(hosts.map { $0.alias.lowercased() }).count == hosts.count,
+                  Set(hosts.map(\.id)).count == hosts.count else {
+                throw RemoteHandoffError.invalidConfiguration
+            }
+            for host in hosts { try host.validate() }
+            var updated = settings
+            updated.remoteHosts = hosts
+            try await store.saveSettings(updated)
+            settings = updated
+            remoteResults.removeAll { result in !hosts.contains(where: { $0.id == result.hostID }) }
+        } catch { showError(error) }
+    }
+
+    public func checkRemoteHost(_ host: SSHRemoteHost) async throws -> String {
+        guard let remoteHandoff else { throw RemoteHandoffError.requirements }
+        return try await remoteHandoff.check(host)
+    }
+
+    public func retryRemoteHost(_ hostID: UUID, expectedAccountID: UUID) async {
+        guard !isMutating, let remoteHandoff else { return }
+        isMutating = true
+        await cancelUsageRefresh()
+        defer { isMutating = false; refreshWeeklyUsage() }
+        do {
+            try await syncActiveIdentity()
+            guard activeAccountID == expectedAccountID else { throw RemoteHandoffError.credentialChanged }
+            try await remoteHandoff.retry(hostID: hostID, expectedAccountID: expectedAccountID)
+        } catch { showError(error) }
+        remoteResults = await remoteHandoff.results()
+    }
+
     public func setShowsMenuBarPercentage(_ enabled: Bool) async {
         settings.showsMenuBarPercentage = enabled
         do {
@@ -364,7 +413,7 @@ open class AccountController {
         visibleError = OperationError(
             stage: nil,
             titleKey: "operation_failed",
-            messageKey: nil,
+            messageKey: (error as? RemoteHandoffError)?.localizationKey,
             message: error.localizedDescription,
             underlyingDescription: String(describing: error)
         )

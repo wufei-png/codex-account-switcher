@@ -30,9 +30,23 @@ struct MenuBarPopover: View {
                     }
                     .disabled(updater.isInstalling)
                 case .settings:
-                    SettingsView(model: model, updater: updater) {
-                        page = .accounts
-                    }
+                    SettingsView(model: model, updater: updater, onBack: { page = .accounts },
+                                 onRemoteHosts: { page = .remoteHosts })
+                case .remoteHosts:
+                    RemoteHostsView(model: model, onBack: { page = .settings },
+                                    onSync: { host in
+                                        if let account = model.accounts.first(where: { $0.id == model.activeAccountID }) {
+                                            page = .confirmRemoteSync(host, account)
+                                        }
+                                    })
+                        .disabled(updater.isInstalling)
+                case let .confirmRemoteSync(host, account):
+                    RemoteSyncConfirmationPage(model: model, host: host, account: account,
+                        onCancel: { page = .remoteHosts }, onConfirm: {
+                            page = .remoteHosts
+                            Task { await model.retryRemoteHost(host.id, expectedAccountID: account.id) }
+                        })
+                        .disabled(model.isMutating || updater.isInstalling)
                 case let .confirmSwitch(account):
                     SwitchConfirmationPage(
                         model: model,
@@ -185,6 +199,8 @@ private enum PopoverPage {
     case accounts
     case manageAccounts
     case settings
+    case remoteHosts
+    case confirmRemoteSync(SSHRemoteHost, AccountProfile)
     case confirmSwitch(AccountProfile)
 }
 
@@ -210,6 +226,21 @@ private struct SwitchConfirmationPage: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if model.settings.remoteHosts.contains(where: \.isEnabled) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(model.text("remote_confirm")).font(.system(size: 11.5))
+                            ForEach(model.settings.remoteHosts.filter(\.isEnabled)) { host in
+                                Text(host.alias).font(.system(size: 12, weight: .medium))
+                            }
+                            Text(model.text("remote_trust")).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                            Text(model.text("remote_reconnect")).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 240)
+                }
+
                 HStack(spacing: 7) {
                     Button(model.text("cancel"), action: onCancel)
                         .buttonStyle(.bordered)
@@ -220,6 +251,35 @@ private struct SwitchConfirmationPage: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+            .padding(14)
+        }
+    }
+}
+
+private struct RemoteSyncConfirmationPage: View {
+    @ObservedObject var model: AppModel
+    let host: SSHRemoteHost
+    let account: AccountProfile
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PopoverHeader(title: model.format("remote_sync_title", host.alias),
+                          backTitle: model.text("cancel"), onBack: onCancel)
+            Divider()
+            VStack(alignment: .leading, spacing: 14) {
+                Text(account.email ?? account.displayName).fontWeight(.medium)
+                Text(model.text("remote_sync_body"))
+                Text(model.text("remote_trust"))
+                Text(model.text("remote_reconnect"))
+                HStack {
+                    Button(model.text("cancel"), action: onCancel).buttonStyle(.bordered)
+                    Spacer()
+                    Button(model.text("remote_sync_confirm"), action: onConfirm).buttonStyle(.borderedProminent)
+                }
+            }
+            .font(.system(size: 11.5))
             .padding(14)
         }
     }

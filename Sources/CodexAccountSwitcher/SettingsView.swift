@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var updater: AppUpdater
     let onBack: () -> Void
+    var onRemoteHosts: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,6 +75,14 @@ struct SettingsView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .fixedSize()
+            }
+
+            rowDivider
+            settingRow("remote_hosts") {
+                Button(action: onRemoteHosts) { Image(systemName: "chevron.right") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(model.text("remote_hosts"))
+                    .disabled(model.isMutating || updater.isInstalling)
             }
 
             sectionLabel("settings_updates")
