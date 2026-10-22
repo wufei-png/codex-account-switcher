@@ -7,7 +7,7 @@ The MVP test suite should prove two things:
 1. the direct happy path works;
 2. failures stop exactly where they occur and remain visible while the bounded pre-commit credential restoration preserves account consistency.
 
-It should test the documented verification/commit restoration and confirm that no general rollback state machine, retry, credential backup file, journal, or startup recovery exists.
+It should test the documented verification/commit restoration and confirm that no general rollback state machine, automatic retry, credential backup file, journal, or startup recovery exists.
 
 ### Local toolchains
 
@@ -114,6 +114,8 @@ Specific partial-state assertions:
 Use both the fake store and the real `AccountStore` so call ordering, atomic credential installation, registry-write failure, and on-disk bytes are covered.
 
 ## 4. App-server fixture tests
+
+SSH synchronization tests cover post-commit ordering, per-host failure isolation, explicit retry, stdin credential transfer, strict host-key options, cancellation, timeouts and redacted errors. Run `python3 scripts/tests/remote-handoff.test.py` with Python 3.11+ to exercise the remote filesystem operations, fake Codex RPC process and a Unix WebSocket fixture that retains a cached account until restarted. Coverage includes private permissions, atomic replacement, verification failure restoration, concurrent-login preservation, runtime workspace verification, stale control sockets, process-handle binding before peer revalidation, read-only Linux pidfd capability checks before credential changes, and libc/native pidfd operations on Python builds without the wrappers. CI also runs this suite in Debian/glibc Python 3.11 and 3.13 containers and an Alpine/musl Python 3.13 container. The Linux integration case exercises real process-handle signaling and exit readiness on isolated children through both system-libc selection and a forced raw-syscall path. The aarch64 raw ABI mapping is covered by a unit test; these container checks run on x86_64 and do not establish ARM64 host validation.
 
 Create a fake JSON-RPC child process that returns:
 

@@ -72,6 +72,8 @@ Selecting another account opens a normal confirmation view. It explains fixed be
 - existing Codex CLI processes are not restarted and continue with the account state they already loaded;
 - newly started Codex CLI processes use the newly selected account.
 
+On macOS, the confirmation also lists enabled SSH hosts that will receive the selected login credential and warns that synchronization restarts their Desktop connection services, interrupting running tasks. Success requires the service to confirm the selected account and workspace. Remote failures keep the completed local switch in place, and separate remote CLI sessions require a restart.
+
 These are product semantics, not Settings options.
 
 The confirmation renders inside the popover. Cancel returns to the account list, keeps the popover open, and starts no switch operation.
@@ -87,6 +89,7 @@ Preflight target and original active profile
 → activate target credentials
 → verify target identity
 → commit active profile
+→ sync enabled SSH hosts (macOS)
 → reopen Codex Desktop
 ```
 
@@ -101,7 +104,7 @@ The MVP does not implement:
 - startup recovery;
 - silent fallback to the previous account.
 
-When a step fails, execution stops and the exact original error is shown. If the bounded credential restoration also fails, the same error report contains both failures.
+When a local step fails, execution stops and the exact original error is shown. If the bounded credential restoration also fails, the same error report contains both failures. SSH synchronization runs after local commit and records each host's result independently. Remote verification failure attempts to restore that host's original credential; a failed host does not block other hosts or Desktop reopening.
 
 ## 6. Credential storage
 
@@ -138,6 +141,7 @@ Settings contains:
 - `Show 5-hour Usage`: show or hide the optional 5-hour line in account rows;
 - `Status Bar Usage Window`: choose the 5-hour or weekly remaining percentage shown in the menu bar or Windows tray;
 - `Language`: `System Default`, `English`, `简体中文`.
+- `SSH Hosts` (macOS): manage trusted aliases, test connections, enable synchronization and explicitly retry a host. Hosts start disabled. Progress and per-host results appear in SSH Hosts; the account page keeps its existing layout. Sync Current Account keeps local Desktop running and restarts only the remote Desktop service. Local account switching retains its close → switch → reopen lifecycle.
 
 `Show 5-hour Usage` defaults to off and affects account rows only. The status bar defaults to the active account's 5-hour remaining percentage and falls back to weekly when 5-hour data is unavailable. Both settings persist immediately in `settings.json`.
 
@@ -183,4 +187,4 @@ The implementation should:
 - avoid broad `catch` blocks that convert every failure into a generic message;
 - avoid retry loops unless a later product requirement explicitly adds them.
 
-A partially completed switch remains observable. The implementation performs only the documented pre-commit credential restoration and adds no generic repair, retry, or startup-recovery behavior.
+A partially completed switch remains observable. Local failures use the documented pre-commit credential restoration. SSH results include the attempted account and time; transport failures report uncertain remote state, and retry requires explicit confirmation.

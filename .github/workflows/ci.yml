@@ -29,6 +29,24 @@ jobs:
         run: node scripts/check-site-geo.mjs
       - name: Check platform release routing
         run: node --test scripts/tests/*.test.mjs
+      - name: Check SSH credential handoff with isolated homes
+        run: python3 scripts/tests/remote-handoff.test.py
+
+  remote-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["python:3.11-slim-bookworm", "python:3.13-slim-bookworm", "python:3.13-alpine"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check SSH helper across Python and libc builds
+        env:
+          PYTHON_IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm --init --network none --volume "$PWD:/workspace:ro" --workdir /workspace \
+            "$PYTHON_IMAGE" python scripts/tests/remote-handoff.test.py
 
   test:
     runs-on: macos-26
@@ -59,3 +77,38 @@ jobs:
 
       - name: Run core checks
         run: ./scripts/run-core-checks.sh
+
+      - name: Package an ad-hoc signed macOS test DMG
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          app_path=$(CODESIGN_IDENTITY=- SWIFT_BUILD_ARCH=arm64 ./scripts/package-local-app.sh | tail -n 1)
+          plist="$app_path/Contents/Info.plist"
+          plutil -replace SUEnableAutomaticChecks -bool false "$plist"
+          plutil -insert CodexSwitcherSourceRevision -string "$(git rev-parse HEAD)" "$plist"
+          plutil -insert CodexSwitcherHeadRevision -string "$HEAD_SHA" "$plist"
+          codesign --force --sign - "$app_path"
+          codesign --verify --deep --strict "$app_path"
+          test -s "$app_path/Contents/Resources/CodexAccountSwitcher_CodexAccountSwitcher.bundle/remote-handoff.py"
+
+          staging=$(mktemp -d "$RUNNER_TEMP/test-dmg.XXXXXX")
+          trap 'rm -rf "$staging"' EXIT
+          ditto "$app_path" "$staging/Codex Account Switcher.app"
+          cp LICENSE "$staging/LICENSE.txt"
+          ln -s /Applications "$staging/Applications"
+          mkdir -p .build/test-artifacts
+          image="Codex-Account-Switcher-macos-arm64-test-${HEAD_SHA:0:7}.dmg"
+          hdiutil create -volname "Codex Account Switcher Test" -srcfolder "$staging" \
+            -format UDZO ".build/test-artifacts/$image"
+          hdiutil verify ".build/test-artifacts/$image"
+          cd .build/test-artifacts
+          shasum -a 256 "$image" > "$image.sha256"
+
+      - name: Upload macOS test installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-test-dmg
+          path: .build/test-artifacts/*.dmg*
+          if-no-files-found: error
+          retention-days: 7

@@ -296,6 +296,19 @@ public actor AccountStore: AccountStoring {
         try copyCredential(from: source, to: profileHome(id: activeID).appending(path: "auth.json"))
     }
 
+    /// Kept within the core: native presentation receives only host outcomes.
+    func activeCredential(for profile: AccountProfile) throws -> Data {
+        guard try loadRegistry().activeAccountID == profile.id else {
+            throw AccountStoreError.activeCredentialMismatch
+        }
+        let bytes = try readChecked(activeHomeURL.appending(path: "auth.json"))
+        guard bytes.count <= 1_048_576,
+              let identity = try CredentialIdentity.decode(bytes), identity.matches(profile) else {
+            throw AccountStoreError.activeCredentialMismatch
+        }
+        return bytes
+    }
+
     public func activateTargetCredential(id: UUID) throws {
         try installCredential(id: id)
     }

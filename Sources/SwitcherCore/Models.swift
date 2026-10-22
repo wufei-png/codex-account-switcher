@@ -55,6 +55,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var showsMenuBarPercentage: Bool
     public var showsFiveHourUsage: Bool
     public var statusBarUsageWindow: StatusBarUsageWindow
+    public var remoteHosts: [SSHRemoteHost]
 
     public static let `default` = AppSettings(
         language: .system,
@@ -67,12 +68,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
         language: AppLanguage,
         showsMenuBarPercentage: Bool = true,
         showsFiveHourUsage: Bool = false,
-        statusBarUsageWindow: StatusBarUsageWindow = .fiveHour
+        statusBarUsageWindow: StatusBarUsageWindow = .fiveHour,
+        remoteHosts: [SSHRemoteHost] = []
     ) {
         self.language = language
         self.showsMenuBarPercentage = showsMenuBarPercentage
         self.showsFiveHourUsage = showsFiveHourUsage
         self.statusBarUsageWindow = statusBarUsageWindow
+        self.remoteHosts = remoteHosts
     }
 
     public init(from decoder: any Decoder) throws {
@@ -90,6 +93,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
             StatusBarUsageWindow.self,
             forKey: .statusBarUsageWindow
         ) ?? .fiveHour
+        remoteHosts = try container.decodeIfPresent([SSHRemoteHost].self, forKey: .remoteHosts) ?? []
     }
 }
 

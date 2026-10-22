@@ -19,9 +19,12 @@ public struct SwitchService: SwitchServicing {
     public let desktop: any DesktopControlling
     public let store: any AccountStoring
     public let codex: any CodexIdentityReading
+    public let commitObserver: (any SwitchCommitObserving)?
 
-    public init(desktop: any DesktopControlling, store: any AccountStoring, codex: any CodexIdentityReading) {
+    public init(desktop: any DesktopControlling, store: any AccountStoring, codex: any CodexIdentityReading,
+                commitObserver: (any SwitchCommitObserving)? = nil) {
         self.desktop = desktop; self.store = store; self.codex = codex
+        self.commitObserver = commitObserver
     }
 
     public func switchAccount(to targetID: UUID) async throws {
@@ -100,6 +103,8 @@ public struct SwitchService: SwitchServicing {
                 originalError: error
             )
         }
+
+        await commitObserver?.didCommitAccount(target)
 
         do {
             try await desktop.reopenDesktop()
